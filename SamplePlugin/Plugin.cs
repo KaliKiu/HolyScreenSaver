@@ -1,12 +1,22 @@
-﻿using Dalamud.Game.Command;
+using Dalamud.Game.Command;
+using Dalamud.Interface.Windowing;
 using Dalamud.IoC;
 using Dalamud.Plugin;
-using System.IO;
-using Dalamud.Interface.Windowing;
 using Dalamud.Plugin.Services;
-using SamplePlugin.Windows;
+using FFXIVClientStructs.FFXIV.Client.UI;
+using FFXIVClientStructs.FFXIV.Client.UI.Agent;
+using FFXIVClientStructs.FFXIV.Component.GUI;
+using HolyScreenSaver.Data;
+using HolyScreenSaver.HudHandler;
+using HolyScreenSaver.Windows;
+using Lumina.Data.Parsing.Scd;
+using System;
+using System.IO;
+using System.Numerics;
+using static FFXIVClientStructs.FFXIV.Client.UI.Agent.AgentMJIFarmManagement;
 
-namespace SamplePlugin;
+
+namespace HolyScreenSaver;
 
 public sealed class Plugin : IDalamudPlugin
 {
@@ -17,6 +27,9 @@ public sealed class Plugin : IDalamudPlugin
     [PluginService] internal static IPlayerState PlayerState { get; private set; } = null!;
     [PluginService] internal static IDataManager DataManager { get; private set; } = null!;
     [PluginService] internal static IPluginLog Log { get; private set; } = null!;
+    [PluginService] internal static IFramework Framework { get; private set; } = null!;
+    [PluginService] public static IGameGui GameGui { get; private set; } = null!;
+    public HolyScreenSaver.HudHandler.HudHandler HudHandler { get; private set; }
 
     private const string CommandName = "/pmycommand";
 
@@ -25,12 +38,16 @@ public sealed class Plugin : IDalamudPlugin
     public readonly WindowSystem WindowSystem = new("SamplePlugin");
     private ConfigWindow ConfigWindow { get; init; }
     private MainWindow MainWindow { get; init; }
+    private IFramework framework;
+
+    private DateTime _lastUpdate = DateTime.MinValue;
+    private const float Speed = 5f; // Speed in pixels per update
 
     public Plugin()
     {
+        this.HudHandler = new HolyScreenSaver.HudHandler.HudHandler(GameGui);
         Configuration = PluginInterface.GetPluginConfig() as Configuration ?? new Configuration();
-
-        // You might normally want to embed resources and load them from the manifest stream
+        InitializeHudStates();
         var goatImagePath = Path.Combine(PluginInterface.AssemblyLocation.Directory?.FullName!, "goat.png");
 
         ConfigWindow = new ConfigWindow(this);
@@ -41,28 +58,90 @@ public sealed class Plugin : IDalamudPlugin
 
         CommandManager.AddHandler(CommandName, new CommandInfo(OnCommand)
         {
-            HelpMessage = "A useful message to display in /xlhelp"
+            HelpMessage = ""
         });
 
-        // Tell the UI system that we want our windows to be drawn through the window system
+        Vector2? pos = this.HudHandler.GetHotbarPosition("_ActionBar01");
+        Log.Debug("Hotbar position: {Position}", pos.HasValue ? pos.Value.ToString() : "null");
+
         PluginInterface.UiBuilder.Draw += WindowSystem.Draw;
 
-        // This adds a button to the plugin installer entry of this plugin which allows
-        // toggling the display status of the configuration ui
         PluginInterface.UiBuilder.OpenConfigUi += ToggleConfigUi;
 
-        // Adds another button doing the same but for the main ui of the plugin
         PluginInterface.UiBuilder.OpenMainUi += ToggleMainUi;
 
-        // Add a simple message to the log with level set to information
-        // Use /xllog to open the log window in-game
-        // Example Output: 00:57:54.959 | INF | [SamplePlugin] ===A cool log message from Sample Plugin===
-        Log.Information($"===A cool log message from {PluginInterface.Manifest.Name}===");
+        this.framework = Framework;
+       
+        this.framework.Update += OnUpdate;
     }
+    public void InitializeHudStates()
+    {
+        var cid = PlayerState.ContentId;
+        if (cid == 0) return; 
+        var stats = Configuration.GetStats(cid);
+        var random = new Random();
+        stats.SavedHudStates.Clear();
 
+        foreach (var entry in HudIdentifiers.Hotbars)
+            {
+            var pos = this.HudHandler.GetHotbarPosition(entry.Value);
+                if (pos.HasValue)
+                {
+                double angleDegrees = random.NextDouble() * 360.0;
+
+                float angleRadians = (float)(angleDegrees * (Math.PI / 180.0));
+
+                float velX = Speed * MathF.Cos(angleRadians);
+                float velY = Speed * MathF.Sin(angleRadians);
+
+                stats.SavedHudStates.Add(new HudElement
+                    {
+                        ElementId = entry.Value,
+                        FirstPosition = pos.Value,
+                        CurrentPosition = pos.Value,
+                        Velocity = new Vector2(velX, velY)
+                });
+                }
+            }
+        Configuration.Save();
+        Log.Info($"Successfully replaced HUD layout for character {cid}");
+    }
+    public void ResetAllElements()
+    {
+        var cid = PlayerState.ContentId;
+        CharacterStats stats = Configuration.GetStats(cid);
+
+        foreach (var element in stats.SavedHudStates)
+        {
+            Log.Debug($"Resetting {element.ElementId} to {element.FirstPosition}");
+            element.CurrentPosition = element.FirstPosition;
+            HudHandler.UpdateElementPosition(element);
+
+        }
+    }
+    public void OnUpdate(IFramework framework)
+    {
+        var cid = PlayerState.ContentId;
+        CharacterStats stats = Configuration.GetStats(cid);
+
+        if (stats.MoveBool)
+        {
+            MoveElements();
+        }
+    }
+    private void MoveElements()
+    {
+        var cid = PlayerState.ContentId;
+        CharacterStats stats = Configuration.GetStats(cid);
+        foreach(var element in stats.SavedHudStates)
+        {
+            HudHandler.UpdateElementPosition(element);
+            HudHandler.HandleBouncing(element, 1920f, 1080f);
+            Log.Debug($"{element.ElementId} is now at {element.CurrentPosition} with velocity {element.Velocity}");
+        }
+    }
     public void Dispose()
     {
-        // Unregister all actions to not leak anything during disposal of plugin
         PluginInterface.UiBuilder.Draw -= WindowSystem.Draw;
         PluginInterface.UiBuilder.OpenConfigUi -= ToggleConfigUi;
         PluginInterface.UiBuilder.OpenMainUi -= ToggleMainUi;
@@ -77,7 +156,6 @@ public sealed class Plugin : IDalamudPlugin
 
     private void OnCommand(string command, string args)
     {
-        // In response to the slash command, toggle the display status of our main ui
         MainWindow.Toggle();
     }
     

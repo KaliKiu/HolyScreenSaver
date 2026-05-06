@@ -1,13 +1,16 @@
-﻿using System;
+using System;
 using System.Numerics;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Interface.Windowing;
+using HolyScreenSaver;
+using Serilog;
 
-namespace SamplePlugin.Windows;
+namespace HolyScreenSaver.Windows;
 
 public class ConfigWindow : Window, IDisposable
 {
     private readonly Configuration configuration;
+    private readonly Plugin plugin;
 
     // We give this window a constant ID using ###.
     // This allows for labels to be dynamic, like "{FPS Counter}fps###XYZ counter window",
@@ -17,17 +20,17 @@ public class ConfigWindow : Window, IDisposable
         Flags = ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoScrollbar |
                 ImGuiWindowFlags.NoScrollWithMouse;
 
-        Size = new Vector2(232, 90);
+        Size = new Vector2(400, 400);
         SizeCondition = ImGuiCond.Always;
 
         configuration = plugin.Configuration;
+        this.plugin = plugin;
     }
 
     public void Dispose() { }
 
     public override void PreDraw()
     {
-        // Flags must be added or removed before Draw() is being called, or they won't apply
         if (configuration.IsConfigWindowMovable)
         {
             Flags &= ~ImGuiWindowFlags.NoMove;
@@ -40,19 +43,45 @@ public class ConfigWindow : Window, IDisposable
 
     public override void Draw()
     {
-        // Can't ref a property, so use a local copy
-        var configValue = configuration.SomePropertyToBeSavedAndWithADefault;
-        if (ImGui.Checkbox("Random Config Bool", ref configValue))
+        var cid = Plugin.PlayerState.ContentId;
+        var stats = configuration.GetStats(cid);
+
+        if(ImGui.Button("GetPos"))
         {
-            configuration.SomePropertyToBeSavedAndWithADefault = configValue;
-            // Can save immediately on change if you don't want to provide a "Save and Close" button
+            Log.Debug("Pressed get position button");
+            Vector2? hotbarPos = this.plugin.HudHandler.GetHotbarPosition("_ActionBar01");
+            if (hotbarPos.HasValue)
+            {
+                float x = hotbarPos.Value.X;
+                float y = hotbarPos.Value.Y;
+
+                Log.Debug($"Hotbar 1 is at: {x}, {y}");
+            }
+            else
+            {
+                Log.Debug("Could not find Hotbar 1. Is it hidden?");
+            }
+        }
+        if (ImGui.Button("SetPos"))
+        {
+            Log.Debug("Pressed set position button");
+            this.plugin.HudHandler.SetHotbarPosition("_ActionBar01", new Vector2(678, 956));
+        }
+        var movebool = stats.MoveBool;
+        if (ImGui.Checkbox("Gambling Mode", ref movebool))
+        {
+            stats.MoveBool = movebool;
             configuration.Save();
         }
-
-        var movable = configuration.IsConfigWindowMovable;
-        if (ImGui.Checkbox("Movable Config Window", ref movable))
+        if (ImGui.Button("SaveHudLayout"))
         {
-            configuration.IsConfigWindowMovable = movable;
+            Log.Debug("Pressed save HUD layout button");
+            this.plugin.InitializeHudStates();
+        }
+        if (ImGui.Button("RESETALL"))
+        {
+            Log.Debug("Pressed save HUD layout button");
+            this.plugin.ResetAllElements();
             configuration.Save();
         }
     }

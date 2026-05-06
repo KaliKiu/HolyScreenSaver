@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Numerics;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Interface.Textures;
@@ -7,7 +7,7 @@ using Dalamud.Interface.Utility.Raii;
 using Dalamud.Interface.Windowing;
 using Lumina.Excel.Sheets;
 
-namespace SamplePlugin.Windows;
+namespace HolyScreenSaver.Windows;
 
 public class MainWindow : Window, IDisposable
 {
